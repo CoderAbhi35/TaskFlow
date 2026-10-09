@@ -1,0 +1,97 @@
+@base = http://localhost:5182/api/v1
+
+### Sign in (development issuer). Users: viewer, operator, admin; password = username.
+# @name login
+POST {{base}}/auth/token
+Content-Type: application/json
+
+{ "username": "admin", "password": "admin" }
+
+###
+@token = {{login.response.body.accessToken}}
+
+### Health (includes the database)
+GET {{base}}/health
+
+### Create a job (safe to repeat thanks to the Idempotency-Key)
+# @name create
+POST {{base}}/jobs
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Idempotency-Key: report-12345-2026-09
+
+{
+  "jobType": "GENERATE_REPORT",
+  "priority": "HIGH",
+  "payload": { "customerId": 12345, "reportType": "MONTHLY" },
+  "retryPolicy": { "maxRetries": 3, "backoffSeconds": 30 }
+}
+
+### Create a delayed job
+POST {{base}}/jobs
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "jobType": "SEND_NOTIFICATION",
+  "payload": { "userId": 42, "template": "WELCOME" },
+  "scheduledAt": "2030-01-01T09:00:00Z"
+}
+
+### Get the job
+GET {{base}}/jobs/{{create.response.body.id}}
+Authorization: Bearer {{token}}
+
+### Execution history
+GET {{base}}/jobs/{{create.response.body.id}}/attempts
+Authorization: Bearer {{token}}
+
+### Cancel
+POST {{base}}/jobs/{{create.response.body.id}}/cancel
+Authorization: Bearer {{token}}
+
+### Retry (only for FAILED or DEAD_LETTERED jobs)
+POST {{base}}/jobs/{{create.response.body.id}}/retry
+Authorization: Bearer {{token}}
+
+### Search: newest first, pass nextCursor back as cursor for the next page
+GET {{base}}/jobs?status=FAILED&status=DEAD_LETTERED&limit=25
+Authorization: Bearer {{token}}
+
+### Create a recurring schedule: every day at 02:00 India time
+# @name schedule
+POST {{base}}/schedules
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Nightly customer reports",
+  "jobType": "GENERATE_REPORT",
+  "cronExpression": "0 2 * * *",
+  "timeZone": "Asia/Kolkata",
+  "payload": { "customerId": 12345, "reportType": "DAILY" }
+}
+
+### List schedules
+GET {{base}}/schedules
+Authorization: Bearer {{token}}
+
+### Pause / resume a schedule
+POST {{base}}/schedules/{{schedule.response.body.id}}/pause
+Authorization: Bearer {{token}}
+
+###
+POST {{base}}/schedules/{{schedule.response.body.id}}/resume
+Authorization: Bearer {{token}}
+
+### Delete a schedule (jobs it created are kept)
+DELETE {{base}}/schedules/{{schedule.response.body.id}}
+Authorization: Bearer {{token}}
+
+### Workers
+GET {{base}}/workers
+Authorization: Bearer {{token}}
+
+### Queue backlog per job type
+GET {{base}}/queues
+Authorization: Bearer {{token}}

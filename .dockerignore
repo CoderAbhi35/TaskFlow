@@ -1,0 +1,17 @@
+# Images are built from the repository root; send the daemon only what the Dockerfiles copy.
+.git
+.github
+.vs
+.vscode
+.idea
+.claude
+**/bin
+**/obj
+**/*.user
+**/TestResults
+tests
+deploy/kubernetes
+deploy/observability
+frontend/reeve-ui/node_modules
+frontend/reeve-ui/dist
+frontend/reeve-ui/.angular

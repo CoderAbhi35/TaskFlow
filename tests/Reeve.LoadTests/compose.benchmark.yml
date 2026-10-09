@@ -1,0 +1,20 @@
+# Benchmark settings on top of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f tests/Reeve.LoadTests/compose.benchmark.yml up -d --build --wait
+#
+# One load generator signs in as one user, so the per-user rate limits (60 submissions a minute)
+# would measure the limiter rather than the system. Everything else is the normal configuration.
+# TELEMETRY=false switches tracing and metrics export off, to measure what observability costs.
+services:
+  api:
+    environment:
+      RateLimiting__Policies__default__PermitLimit: "100000000"
+      RateLimiting__Policies__submissions__PermitLimit: "100000000"
+      Telemetry__Enabled: ${TELEMETRY:-true}
+  scheduler:
+    environment:
+      Telemetry__Enabled: ${TELEMETRY:-true}
+  worker:
+    environment:
+      Worker__Concurrency: ${WORKER_CONCURRENCY:-10}
+      Telemetry__Enabled: ${TELEMETRY:-true}

@@ -1,0 +1,43 @@
+# OpenTelemetry Collector: the single OTLP endpoint every Reeve process pushes to.
+# Traces go to Jaeger; metrics are exposed for Prometheus to scrape.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  batch: {}
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Drop a series one minute after it stops being reported (default: 5 minutes). Otherwise a worker
+    # that was already marked offline keeps exporting its last heartbeat age and the stale-worker
+    # alert fires for minutes after the problem was handled. Services export every 10 s.
+    metric_expiration: 1m
+    # service.name / service.instance.id become labels, so dashboards can split by service and process.
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/jaeger]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]

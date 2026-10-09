@@ -1,0 +1,33 @@
+# Reeve application manifests. Environment-specific pieces come from an overlay:
+#   - the Secret "reeve-secrets" (ConnectionStrings__Reeve, Auth__SigningKey),
+#   - image names and tags,
+#   - the addresses of PostgreSQL, Kafka, Redis and the OpenTelemetry Collector.
+# See overlays/local for a complete, self-contained example.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: reeve
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: reeve
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - migrate.yaml
+  - api.yaml
+  - scheduler.yaml
+  - worker.yaml
+  - ui.yaml
+
+# Non-secret settings, as environment variables in the services' Section__Key form. The generated
+# name carries a content hash, so changing a value rolls the deployments that use it.
+configMapGenerator:
+  - name: reeve-config
+    literals:
+      - Kafka__BootstrapServers=kafka:9092
+      - Redis__ConnectionString=redis:6379
+      - Telemetry__OtlpEndpoint=http://otel-collector.observability:4317
+      - Logging__Console__FormatterName=json

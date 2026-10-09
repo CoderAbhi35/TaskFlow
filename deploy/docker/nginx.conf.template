@@ -1,0 +1,81 @@
+# The dashboard and the API behind one origin. A template: at startup the image's entrypoint fills in
+# ${NGINX_LOCAL_RESOLVERS} (the nameservers from /etc/resolv.conf) and ${API_SERVER} (host:port).
+
+# The container's own DNS server (Docker's, or the cluster's). nginx ignores DNS search domains, so
+# in Kubernetes API_SERVER must be the Service's full name.
+resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
+
+upstream reeve_api {
+    zone reeve_api 64k;
+    # "resolve" follows DNS changes: a recreated API container gets a new address, and scaled
+    # replicas are all used.
+    server ${API_SERVER} resolve;
+    # Reuse connections to the API. Opening one per request ran out of local ports at about
+    # 900 requests/s under load ("connect() failed (99: Address not available)").
+    keepalive 64;
+}
+
+server {
+    listen 8080;
+    server_name _;
+    server_tokens off;
+    root /usr/share/nginx/html;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    # Angular's runtime adds component styles as <style> elements, hence 'unsafe-inline' for styles
+    # only. Scripts are limited to this origin (the build doesn't inline any).
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Frame-Options "DENY" always;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location /api/ {
+        proxy_pass http://reeve_api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        # nginx is the edge: replace any client-supplied X-Forwarded-For instead of appending to it.
+        # The API trusts this header only from the proxy network (ReverseProxy:TrustedNetworks).
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # The API enforces its own body limit (128 KB) with a problem response; don't pre-empt it
+        # with nginx's HTML error page.
+        client_max_body_size 1m;
+        proxy_read_timeout 30s;
+        # No API instance reachable (all restarting, or all unready because PostgreSQL is down):
+        # answer like the API does, not with nginx's HTML error page.
+        error_page 502 503 504 = @api_unavailable;
+    }
+
+    location @api_unavailable {
+        default_type application/problem+json;
+        add_header Retry-After 5 always;
+        add_header X-Content-Type-Options "nosniff" always;
+        return 503 '{"type":"about:blank","title":"Service unavailable","status":503,"detail":"The API is temporarily unavailable. Retry shortly.","code":"unavailable"}';
+    }
+
+    # File names with a content hash (main-H6NXNOXP.js) never change: cache them for a year.
+    location ~* "-[A-Za-z0-9_-]{8}\.(js|css)$" {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
+    # Everything else is the single-page app: unknown paths get index.html, which is never cached so
+    # a new release is picked up on the next load.
+    location / {
+        expires -1;
+        try_files $uri $uri/ /index.html;
+    }
+}

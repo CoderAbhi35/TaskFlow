@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Reeve.Api/Reeve.Api.csproj" />
+    <Project Path="src/Reeve.Application/Reeve.Application.csproj" />
+    <Project Path="src/Reeve.Contracts/Reeve.Contracts.csproj" />
+    <Project Path="src/Reeve.Domain/Reeve.Domain.csproj" />
+    <Project Path="src/Reeve.Infrastructure/Reeve.Infrastructure.csproj" />
+    <Project Path="src/Reeve.Scheduler/Reeve.Scheduler.csproj" />
+    <Project Path="src/Reeve.Worker/Reeve.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Reeve.ApiTests/Reeve.ApiTests.csproj" />
+    <Project Path="tests/Reeve.IntegrationTests/Reeve.IntegrationTests.csproj" />
+    <Project Path="tests/Reeve.LoadTests/Reeve.LoadTests.csproj" />
+    <Project Path="tests/Reeve.UnitTests/Reeve.UnitTests.csproj" />
+  </Folder>
+</Solution>

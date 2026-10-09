@@ -1,0 +1,41 @@
+# Applies pending EF Core migrations, then exits. The services don't wait for it: until
+# the schema is there, their readiness probes fail and they retry, so they come up on their own.
+# Jobs can't be changed once created; delete the finished Job before applying a new image:
+#   kubectl -n reeve delete job reeve-migrate --ignore-not-found
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: reeve-migrate
+  labels:
+    app.kubernetes.io/name: reeve-migrate
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: reeve-migrate
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: reeve-migrate
+          env:
+            - name: REEVE_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef: { name: reeve-secrets, key: ConnectionStrings__Reeve }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }

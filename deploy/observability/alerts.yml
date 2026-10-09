@@ -1,0 +1,100 @@
+# What Reeve alerts on, and why. Thresholds are starting points; tune them with real traffic.
+# Each rule targets a symptom a user would notice (work not running, work failing, API slow),
+# not every internal fluctuation.
+
+groups:
+  - name: reeve-execution
+    rules:
+      - alert: ReeveNoActiveWorkers
+        # Work is waiting and nothing can run it: every job is stalled. Waiting is ready + queued: with
+        # Kafka, jobs move to queued within a second whether or not any worker is consuming.
+        expr: |
+          sum(reeve_queue_depth{state=~"ready|queued"}) > 0
+          and on() (sum(reeve_workers{status="active"}) or on() vector(0)) == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Jobs are waiting but no worker is active"
+          description: "{{ $value }} waiting jobs and no active workers for 2 minutes."
+
+      - alert: ReeveJobsWaitingTooLong
+        # Catches a stuck queue even when the backlog is small (e.g. no worker handles this job type).
+        expr: max by (job_type) (reeve_queue_oldest_waiting_age_seconds) > 300
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.job_type }} jobs have waited over 5 minutes"
+          description: "The oldest waiting {{ $labels.job_type }} job has waited {{ $value | humanizeDuration }}."
+
+      - alert: ReeveHighFailureRate
+        # More than 10% of finished jobs failing, ignoring near-idle periods.
+        expr: |
+          (
+            sum(rate(reeve_jobs_failed_total[5m]))
+            / clamp_min(sum(rate(reeve_jobs_failed_total[5m])) + sum(rate(reeve_jobs_succeeded_total[5m])), 1e-9)
+          ) > 0.10
+          and on() (sum(increase(reeve_jobs_failed_total[5m])) + sum(increase(reeve_jobs_succeeded_total[5m]))) > 20
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "More than 10% of jobs are failing"
+          description: "{{ $value | humanizePercentage }} of jobs finished in failure over the last 5 minutes."
+
+      - alert: ReeveRetryStorm
+        # Many retries relative to completions: a dependency is probably down.
+        expr: |
+          sum(rate(reeve_jobs_retried_total[5m])) > 2 * clamp_min(sum(rate(reeve_jobs_succeeded_total[5m])), 0.01)
+          and on() sum(increase(reeve_jobs_retried_total[5m])) > 50
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Jobs are retrying more than they succeed"
+
+      - alert: ReeveDeadLetters
+        expr: sum by (job_type) (increase(reeve_jobs_failed_total{outcome="dead_lettered"}[15m])) > 0
+        labels: { severity: info }
+        annotations:
+          summary: "{{ $labels.job_type }} jobs were dead-lettered"
+          description: "Retries were exhausted; see the Failures page to inspect and retry."
+
+  - name: reeve-workers
+    rules:
+      - alert: ReeveStaleWorker
+        # Missed heartbeats: crashed or partitioned. Recovery hands its jobs back and then marks it
+        # offline, which drops this count to zero. (The per-worker heartbeat age is on the dashboard for
+        # drilling down; alerting on it would keep firing until that series expires.)
+        expr: sum(reeve_workers{status="stale"}) > 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} worker(s) stopped heartbeating"
+          description: "See 'Heartbeat age per worker' on the Reeve dashboard for which one."
+
+      - alert: ReeveWorkersSaturated
+        expr: |
+          sum(reeve_worker_active_jobs) >= sum(reeve_worker_capacity)
+          and on() sum(reeve_queue_depth{state=~"ready|queued"}) > 100
+        for: 10m
+        labels: { severity: info }
+        annotations:
+          summary: "All worker slots are busy and a backlog is building; consider scaling out"
+
+  - name: reeve-api
+    rules:
+      - alert: ReeveApiHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name="reeve-api"}[5m]))) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "API p95 latency is above 1 s"
+
+      - alert: ReeveApiErrors
+        expr: |
+          sum(rate(http_server_request_duration_seconds_count{service_name="reeve-api", http_response_status_code=~"5.."}[5m]))
+          / clamp_min(sum(rate(http_server_request_duration_seconds_count{service_name="reeve-api"}[5m])), 1e-9) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "More than 5% of API requests fail with a server error"

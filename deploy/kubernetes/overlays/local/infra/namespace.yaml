@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: reeve-infra
+  labels:
+    # The stock database and broker images need more than "restricted" allows.
+    pod-security.kubernetes.io/enforce: baseline

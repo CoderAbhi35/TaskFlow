@@ -1,0 +1,12 @@
+# Development-only backing services. In a real environment these are managed services (or
+# operators), and the overlay only points the application at them.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: reeve-infra
+
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - kafka.yaml
+  - redis.yaml

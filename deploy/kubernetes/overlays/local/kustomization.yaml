@@ -1,0 +1,71 @@
+# A complete Reeve on one local cluster: the application in namespace "reeve" and
+# development-only PostgreSQL, Kafka and Redis in "reeve-infra". Images are the ones
+# `docker compose build` produces (reeve-*:local), loaded into the cluster.
+#
+#   kubectl apply -k deploy/kubernetes/overlays/local
+#
+# Dashboard: http://localhost:30080 (NodePort). Credentials here are for local development only.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - infra
+
+images:
+  - { name: reeve-api, newTag: local }
+  - { name: reeve-worker, newTag: local }
+  - { name: reeve-scheduler, newTag: local }
+  - { name: reeve-migrate, newTag: local }
+  - { name: reeve-ui, newTag: local }
+
+configMapGenerator:
+  - name: reeve-config
+    namespace: reeve
+    behavior: merge
+    literals:
+      - Kafka__BootstrapServers=kafka.reeve-infra.svc.cluster.local:9092
+      - Redis__ConnectionString=redis.reeve-infra.svc.cluster.local:6379
+      # No collector in this overlay; the services carry on without telemetry.
+      - Telemetry__Enabled=false
+      # The dashboard's nginx runs in the pod network (k3s default range).
+      - ReverseProxy__TrustedNetworks__0=10.42.0.0/16
+
+secretGenerator:
+  - name: reeve-secrets
+    namespace: reeve
+    literals:
+      - ConnectionStrings__Reeve=Host=postgres.reeve-infra.svc.cluster.local;Port=5432;Database=reeve;Username=reeve;Password=reeve
+      - Auth__SigningKey=local-kubernetes-only-signing-key-do-not-use-elsewhere
+
+patches:
+  # The built-in token issuer (users viewer/operator/admin, password = username) only starts in
+  # Development. A real cluster sets Auth__Authority to an identity provider instead.
+  - target: { kind: Deployment, name: api }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env
+        value:
+          - { name: ASPNETCORE_ENVIRONMENT, value: Development }
+          - { name: Logging__Console__FormatterOptions__UseUtcTimestamp, value: "true" }
+          - { name: Logging__Console__FormatterOptions__TimestampFormat, value: "yyyy-MM-dd'T'HH:mm:ss.fff'Z'" }
+  - target: { kind: Service, name: ui }
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080
+  # Images are loaded into the cluster, never pulled.
+  - target: { kind: Deployment }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+  - target: { kind: Job }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
